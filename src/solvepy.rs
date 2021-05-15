@@ -8,10 +8,11 @@ use std::string;
 use colored::Colorize;
 use ex::fs;
 use ex::io;
-use maplit::hashmap;
+use handlebars::Handlebars;
+use serde::Serialize;
 use snafu::ResultExt;
 use snafu::Snafu;
-use strfmt::strfmt;
+
 
 #[derive(Debug, Snafu)]
 pub enum Error {
@@ -24,8 +25,11 @@ pub enum Error {
     #[snafu(display("error reading solve script template: {}", source))]
     ReadError { source: io::Error },
 
-    #[snafu(display("error filling in solve script template: {}", source))]
-    FmtError { source: strfmt::FmtError },
+    #[snafu(display("error initializing template: {}", source))]
+    TmplError { source: handlebars::TemplateError },
+
+    #[snafu(display("error rendering solve script template: {}", source))]
+    RenderError { source: handlebars::RenderError },
 
     #[snafu(display("error setting solve script template executable: {}", source))]
     SetExecError { source: io::Error },
@@ -33,9 +37,15 @@ pub enum Error {
 
 pub type Result<T> = std::result::Result<T, Error>;
 
+#[derive(Serialize)]
+struct Bindings {
+    exe: String,
+    libc: String,
+}
+
 /// Make pwntools script that binds the (binary, libc, linker) to `ELF`
 /// variables
-fn make_bindings(opts: &Opts) -> String {
+fn _make_bindings(opts: &Opts) -> String {
     // Helper to make one binding line
     let bind_line = |name: &str, opt_path: &Option<PathBuf>| -> Option<String> {
         opt_path
@@ -57,7 +67,7 @@ fn make_bindings(opts: &Opts) -> String {
 }
 
 /// Make arguments to pwntools `process()` function
-fn make_proc_args(opts: &Opts) -> String {
+fn _make_proc_args(opts: &Opts) -> String {
     let args = if opts.ld.is_some() {
         format!(
             "{}.path, {}.path",
@@ -85,15 +95,16 @@ fn make_stub(opts: &Opts) -> Result<String> {
         }
         None => include_str!("template.py").to_string(),
     };
-    strfmt(
-        &templ,
-        &hashmap! {
-        "bindings".to_string() => make_bindings(opts),
-        "proc_args".to_string() => make_proc_args(opts),
-        "bin_name".to_string() => opts.template_bin_name.clone(),
-        },
-    )
-    .context(FmtError)
+
+    let mut handlebars = Handlebars::new();
+    handlebars.register_template_string("solve", templ.to_owned()).context(TmplError)?;
+
+    let mapping = Bindings {
+        exe: opts.bin.as_ref().unwrap().to_str().unwrap().to_string(),
+        libc: opts.libc.as_ref().unwrap().to_str().unwrap().to_string(),
+    };
+
+    Ok(handlebars.render("solve", &mapping).context(RenderError)?)
 }
 
 /// Write script produced with `make_stub()` to `solve.py` in the
