@@ -96,12 +96,22 @@ fn make_stub(opts: &Opts) -> Result<String> {
         None => include_str!("template.py").to_string(),
     };
 
+    let binary = match opts.bin.as_ref() {
+        Some(b) => b.to_str().unwrap().to_string(),
+        None => "".to_string(),
+    };
+
+    let libc = match opts.libc.as_ref() {
+        Some(l) => l.to_str().unwrap().to_string(),
+        None => "".to_string(),
+    };
+
     let mut handlebars = Handlebars::new();
     handlebars.register_template_string("solve", templ.to_owned()).context(TmplError)?;
 
     let mapping = Bindings {
-        exe: opts.bin.as_ref().unwrap().to_str().unwrap().to_string(),
-        libc: opts.libc.as_ref().unwrap().to_str().unwrap().to_string(),
+        exe: binary,
+        libc: libc,
     };
 
     Ok(handlebars.render("solve", &mapping).context(RenderError)?)
